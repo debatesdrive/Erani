@@ -1,5 +1,6 @@
 import React from 'react';
 import { Phone, PhoneOff, ShieldCheck, Star, Quote } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
 import { MOCK_OPPONENT } from '../constants';
@@ -10,12 +11,14 @@ import { useNavigate } from 'react-router-dom';
 const Call: React.FC = () => {
   const { selectedStance } = useAppContext();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { roomId, opponentStance, opponent } = location.state || {};
 
-  const opponentStanceLabel = selectedStance === Stance.COALITION ? 'אופוזיציה / שמאל' : 'קואליציה / ימין';
+  const opponentStanceLabel = opponentStance === 'COALITION' ? 'קואליציה / ימין' : 'אופוזיציה / שמאל';
   // Use slightly more vibrant colors for the stance section to make it prominent
-  const opponentColorClass = selectedStance === Stance.COALITION ? 'text-red-300' : 'text-blue-300';
-  const opponentBgClass = selectedStance === Stance.COALITION ? 'bg-gradient-to-br from-red-900/40 to-slate-900/60 border-red-500/30' : 'bg-gradient-to-br from-blue-900/40 to-slate-900/60 border-blue-500/30';
-  const opponentBadgeBg = selectedStance === Stance.COALITION ? 'bg-red-600 shadow-red-900/50' : 'bg-blue-600 shadow-blue-900/50';
+  const opponentColorClass = opponentStance === 'COALITION' ? 'text-blue-300' : 'text-red-300';
+  const opponentBgClass = opponentStance === 'COALITION' ? 'bg-gradient-to-br from-blue-900/40 to-slate-900/60 border-blue-500/30' : 'bg-gradient-to-br from-red-900/40 to-slate-900/60 border-red-500/30';
+  const opponentBadgeBg = opponentStance === 'COALITION' ? 'bg-blue-600 shadow-blue-900/50' : 'bg-red-600 shadow-red-900/50';
 
   const handleCallClick = () => {
     // Tactile confirmation pattern
@@ -26,7 +29,7 @@ const Call: React.FC = () => {
 
   const handleEndCall = () => {
     // Navigate to feedback screen instead of resetting immediately
-    navigate('/feedback');
+    navigate('/feedback', { state: { opponent } });
   };
 
   return (
@@ -70,13 +73,12 @@ const Call: React.FC = () => {
         <div className={`w-full p-1 rounded-[2.5rem] bg-gradient-to-b from-white/10 to-transparent p-[1px] mt-4 mb-auto animate-fade-in-up shadow-2xl`}>
           <div className={`w-full h-full p-6 rounded-[2.5rem] border border-white/5 ${opponentBgClass} backdrop-blur-xl relative overflow-hidden flex flex-col items-center text-center`}>
             
-            {/* Avatar with Status Indicator */}
             <div className="relative mb-5 group">
               <div className="absolute inset-0 bg-white/20 rounded-full blur-md group-hover:blur-xl transition-all duration-500"></div>
               <div className="w-32 h-32 rounded-full p-1 bg-gradient-to-tr from-slate-700 to-slate-800 relative z-10">
                  <img 
-                   src={MOCK_OPPONENT.avatarUrl} 
-                   alt={MOCK_OPPONENT.name}
+                   src={opponent?.avatarUrl || "https://via.placeholder.com/128"} 
+                   alt={opponent?.fullName}
                    className="w-full h-full rounded-full object-cover border-4 border-slate-900"
                  />
               </div>
@@ -85,16 +87,16 @@ const Call: React.FC = () => {
               </div>
               <div className="absolute bottom-0 left-0 bg-amber-500 text-slate-900 text-xs font-black px-2 py-1 rounded-lg flex items-center gap-1 shadow-lg border-4 border-slate-900 z-20">
                 <Star size={12} fill="currentColor" />
-                {MOCK_OPPONENT.rating}
+                {opponent?.stats?.rating || 5}
               </div>
             </div>
             
-            <h2 className="text-3xl font-black text-white mb-2 tracking-tight drop-shadow-md">{MOCK_OPPONENT.name}</h2>
-            <p className="text-slate-300 text-sm mb-6 max-w-[90%] leading-relaxed font-light">{MOCK_OPPONENT.bio}</p>
+            <h2 className="text-3xl font-black text-white mb-2 tracking-tight drop-shadow-md">{opponent?.fullName}</h2>
+            <p className="text-slate-300 text-sm mb-6 max-w-[90%] leading-relaxed font-light">{opponent?.bio || "משתמש פעיל באפליקציה"}</p>
             
             {/* Prominent Stance Section */}
             <div className="w-full bg-slate-950/40 rounded-3xl p-5 border border-white/5 relative overflow-hidden">
-               <div className={`absolute top-0 right-0 w-1 h-full ${selectedStance === Stance.COALITION ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+               <div className={`absolute top-0 right-0 w-1 h-full ${opponentStance === 'COALITION' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
                
                <div className="flex flex-col items-center">
                  <span className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-3">העמדה בדיון</span>
@@ -104,7 +106,7 @@ const Call: React.FC = () => {
                  <div className="relative">
                    <Quote size={20} className={`absolute -top-2 -right-4 ${opponentColorClass} opacity-50`} />
                    <p className={`text-base ${opponentColorClass} font-medium leading-relaxed italic px-4`}>
-                     "{MOCK_OPPONENT.stanceDescription}"
+                     "{opponent?.stanceDescription || "מוכן לדיון מעניין!"}"
                    </p>
                  </div>
                </div>
@@ -115,7 +117,7 @@ const Call: React.FC = () => {
         {/* Action Area */}
         <div className="pt-8 pb-4 space-y-4">
           <a 
-            href={`tel:${MOCK_OPPONENT.phoneNumber}`}
+            href={`tel:${opponent?.phoneNumber}`}
             onClick={handleCallClick}
             className="group relative flex items-center justify-center w-full h-20 bg-green-600 hover:bg-green-500 text-white rounded-3xl font-black text-2xl shadow-xl shadow-green-900/40 transition-all active:scale-95 no-underline border-t border-green-400/30 overflow-hidden cursor-pointer"
           >
