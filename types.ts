@@ -9,8 +9,12 @@ export interface UserStats {
 }
 
 export interface User {
+  id?: number;
   fullName: string;
   phoneNumber: string;
+  bio?: string;
+  topics?: string[];
+  profilePicture?: string;
   stats: UserStats;
 }
 

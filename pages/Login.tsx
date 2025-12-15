@@ -9,7 +9,7 @@ import { useAppContext } from '../App';
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAppContext();
-  
+
   const [formData, setFormData] = useState({
     fullName: '',
     phoneNumber: '',
@@ -18,6 +18,7 @@ const Login: React.FC = () => {
     fullName: '',
     phoneNumber: '',
   });
+  const [isLoading, setIsLoading] = useState(false);
 
   const validate = () => {
     let isValid = true;
@@ -45,15 +46,40 @@ const Login: React.FC = () => {
     return isValid;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (validate()) {
-      // Create user with default stats
-      login({
-        ...formData,
-        stats: { debatesCount: 0, rating: 5.0 }
+    if (!validate()) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`http://${window.location.hostname}:3002/api/users/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          phoneNumber: formData.phoneNumber,
+        }),
       });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
+      }
+
+      const data = await response.json();
+
+      // Login with user data from API
+      login(data.user);
       navigate('/lobby');
+    } catch (error) {
+      console.error('Login error:', error);
+      setErrors({
+        fullName: '',
+        phoneNumber: 'שגיאה בהתחברות. נסה שוב.',
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -98,8 +124,8 @@ const Login: React.FC = () => {
         />
 
         <div className="pt-4">
-          <Button type="submit" fullWidth size="xl">
-            התחל נסיעה
+          <Button type="submit" fullWidth size="xl" disabled={isLoading}>
+            {isLoading ? 'מתחבר...' : 'התחל נסיעה'}
           </Button>
         </div>
       </form>
