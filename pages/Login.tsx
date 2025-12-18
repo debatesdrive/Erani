@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe, Settings } from 'lucide-react';
+import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe, Settings, Database } from 'lucide-react';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import Layout from '../components/Layout';
@@ -77,8 +77,7 @@ const Login: React.FC = () => {
       setConfirmationResult(result);
       setStep('otp');
     } catch (err: any) {
-      console.error("Firebase Auth Error Full:", err);
-      
+      console.error("Firebase Auth Error:", err);
       const errorCode = err.code || 'unknown';
       let message = '';
 
@@ -86,16 +85,11 @@ const Login: React.FC = () => {
         message = 'מספר טלפון לא תקין.';
       } else if (errorCode === 'auth/unauthorized-domain') {
         message = `הדומיין ${window.location.hostname} אינו מורשה ב-Firebase.`;
-      } else if (errorCode === 'auth/too-many-requests') {
-        message = 'יותר מדי ניסיונות. נא לנסות שוב מאוחר יותר.';
       } else if (errorCode === 'auth/operation-not-allowed') {
-        message = 'שליחת SMS לישראל אינה מאושרת בפרויקט ה-Firebase שלך. יש לאשר את האזור (Israel) ב-SMS Region Policy.';
-      } else if (errorCode === 'auth/admin-restricted-operation') {
-        message = 'פעולה חסומה. וודא ש-Phone Auth מופעל ב-Firebase Console.';
+        message = 'שליחת SMS לישראל אינה מאושרת. יש להגדיר SMS Region Policy ב-Firebase.';
       } else {
-        message = `שגיאה (${errorCode}): ${err.message || 'שגיאה בשליחת ה-SMS.'}`;
+        message = `שגיאה (${errorCode})`;
       }
-      
       setError(message);
     } finally {
       setLoading(false);
@@ -110,28 +104,44 @@ const Login: React.FC = () => {
     setError('');
 
     try {
+      // 1. Verify OTP with Firebase Auth
       const result = await confirmationResult.confirm(formData.otp);
       const fbUser = result.user;
 
-      const userRef = doc(db, 'users', fbUser.uid);
-      const userSnap = await getDoc(userRef);
+      try {
+        // 2. Try to sync with Firestore
+        const userRef = doc(db, 'users', fbUser.uid);
+        const userSnap = await getDoc(userRef);
 
-      let userData;
-      if (!userSnap.exists()) {
-        userData = {
-          fullName: formData.fullName,
-          phoneNumber: getE164PhoneNumber(formData.phoneNumber),
-          stats: { debatesCount: 0, rating: 5.0 }
-        };
-        await setDoc(userRef, userData);
-      } else {
-        userData = userSnap.data();
+        let userData;
+        if (!userSnap.exists()) {
+          userData = {
+            fullName: formData.fullName,
+            phoneNumber: getE164PhoneNumber(formData.phoneNumber),
+            stats: { debatesCount: 0, rating: 5.0 }
+          };
+          await setDoc(userRef, userData);
+        } else {
+          userData = userSnap.data();
+        }
+
+        login({ ...userData, uid: fbUser.uid } as any);
+        navigate('/lobby');
+      } catch (dbErr: any) {
+        console.error("Firestore Error:", dbErr);
+        if (dbErr.code === 'permission-denied') {
+          setError('שגיאת הרשאות בסיס נתונים. וודא שהגדרת את ה-Firestore Rules ב-Firebase Console.');
+        } else {
+          setError(`שגיאה בגישה לנתונים: ${dbErr.code || 'unknown'}`);
+        }
       }
-
-      login({ ...userData, uid: fbUser.uid } as any);
-      navigate('/lobby');
-    } catch (err: any) {
-      setError(`קוד שגוי (${err.code || 'error'})`);
+    } catch (authErr: any) {
+      console.error("OTP Verification Error:", authErr);
+      if (authErr.code === 'auth/invalid-verification-code') {
+        setError('קוד אימות שגוי. נסה שוב.');
+      } else {
+        setError(`שגיאת אימות: ${authErr.code || 'unknown'}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -195,28 +205,9 @@ const Login: React.FC = () => {
 
           {error && (
             <div className="flex flex-col gap-3">
-              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-4 rounded-xl border border-red-500/20 break-words leading-relaxed">
+              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-4 rounded-xl border border-red-500/20 break-words">
                 {error}
               </p>
-              
-              {error.includes('auth/unauthorized-domain') && (
-                <div className="flex items-center justify-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg border border-slate-800">
-                  <Globe size={12} />
-                  <span>הוסף את {window.location.hostname} ל-Authorized Domains ב-Firebase</span>
-                </div>
-              )}
-
-              {error.includes('auth/operation-not-allowed') && (
-                <div className="flex flex-col gap-2 p-3 bg-slate-900/80 rounded-xl border border-blue-500/30">
-                  <div className="flex items-center gap-2 text-blue-400 text-xs font-bold">
-                    <Settings size={14} />
-                    <span>הוראות למפתח:</span>
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-tight">
-                    Firebase Console > Authentication > Settings > User actions > SMS Region Policy > הוסף את Israel (IL).
-                  </p>
-                </div>
-              )}
             </div>
           )}
 
@@ -244,7 +235,25 @@ const Login: React.FC = () => {
             className="text-center tracking-[1em]"
           />
 
-          {error && <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20">{error}</p>}
+          {error && (
+            <div className="flex flex-col gap-3">
+              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-4 rounded-xl border border-red-500/20 break-words">
+                {error}
+              </p>
+              
+              {error.includes('הרשאות בסיס נתונים') && (
+                <div className="flex flex-col gap-2 p-3 bg-slate-900/80 rounded-xl border border-blue-500/30">
+                  <div className="flex items-center gap-2 text-blue-400 text-xs font-bold">
+                    <Database size={14} />
+                    <span>הוראות למפתח:</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Firebase Console > Firestore Database > Rules > וודא שהרשאות הקריאה/כתיבה מאושרות למשתמשים מחוברים.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="pt-4 space-y-3">
             <Button type="submit" fullWidth size="xl" disabled={loading}>
