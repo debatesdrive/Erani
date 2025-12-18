@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe } from 'lucide-react';
+import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe, Settings } from 'lucide-react';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import Layout from '../components/Layout';
@@ -25,7 +25,6 @@ const Login: React.FC = () => {
   const [showConfigWarning, setShowConfigWarning] = useState(!isFirebaseConfigured());
 
   useEffect(() => {
-    // Only initialize recaptcha if auth is ready and not already initialized
     if (auth && !showConfigWarning && !(window as any).recaptchaVerifier) {
       try {
         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
@@ -69,7 +68,6 @@ const Login: React.FC = () => {
     try {
       const e164Number = getE164PhoneNumber(formData.phoneNumber);
       
-      // Ensure recaptcha is ready
       if (!(window as any).recaptchaVerifier) {
          (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
       }
@@ -81,20 +79,21 @@ const Login: React.FC = () => {
     } catch (err: any) {
       console.error("Firebase Auth Error Full:", err);
       
-      // Map specific errors but always show the code for debugging
       const errorCode = err.code || 'unknown';
-      let message = `שגיאה (${errorCode}): `;
+      let message = '';
 
       if (errorCode === 'auth/invalid-phone-number') {
-        message += 'מספר טלפון לא תקין.';
+        message = 'מספר טלפון לא תקין.';
       } else if (errorCode === 'auth/unauthorized-domain') {
-        message += `הדומיין ${window.location.hostname} אינו מורשה ב-Firebase.`;
+        message = `הדומיין ${window.location.hostname} אינו מורשה ב-Firebase.`;
       } else if (errorCode === 'auth/too-many-requests') {
-        message += 'יותר מדי ניסיונות. נא לנסות שוב מאוחר יותר.';
+        message = 'יותר מדי ניסיונות. נא לנסות שוב מאוחר יותר.';
+      } else if (errorCode === 'auth/operation-not-allowed') {
+        message = 'שליחת SMS לישראל אינה מאושרת בפרויקט ה-Firebase שלך. יש לאשר את האזור (Israel) ב-SMS Region Policy.';
       } else if (errorCode === 'auth/admin-restricted-operation') {
-        message += 'פעולה חסומה. וודא ש-Phone Auth מופעל ב-Firebase Console.';
+        message = 'פעולה חסומה. וודא ש-Phone Auth מופעל ב-Firebase Console.';
       } else {
-        message += err.message || 'שגיאה בשליחת ה-SMS.';
+        message = `שגיאה (${errorCode}): ${err.message || 'שגיאה בשליחת ה-SMS.'}`;
       }
       
       setError(message);
@@ -195,12 +194,27 @@ const Login: React.FC = () => {
           </div>
 
           {error && (
-            <div className="flex flex-col gap-2">
-              <p className="text-red-400 text-xs text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20 break-words">{error}</p>
+            <div className="flex flex-col gap-3">
+              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-4 rounded-xl border border-red-500/20 break-words leading-relaxed">
+                {error}
+              </p>
+              
               {error.includes('auth/unauthorized-domain') && (
-                <div className="flex items-center justify-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg">
+                <div className="flex items-center justify-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg border border-slate-800">
                   <Globe size={12} />
                   <span>הוסף את {window.location.hostname} ל-Authorized Domains ב-Firebase</span>
+                </div>
+              )}
+
+              {error.includes('auth/operation-not-allowed') && (
+                <div className="flex flex-col gap-2 p-3 bg-slate-900/80 rounded-xl border border-blue-500/30">
+                  <div className="flex items-center gap-2 text-blue-400 text-xs font-bold">
+                    <Settings size={14} />
+                    <span>הוראות למפתח:</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Firebase Console > Authentication > Settings > User actions > SMS Region Policy > הוסף את Israel (IL).
+                  </p>
                 </div>
               )}
             </div>
