@@ -189,16 +189,16 @@ const Login: React.FC = () => {
             </label>
             <div className="relative">
               <input
-                className="w-full h-14 bg-slate-900 border border-slate-700 rounded-xl px-4 pr-20 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                className="w-full h-14 bg-slate-900 border border-slate-700 rounded-xl px-4 pl-24 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 type="tel"
                 placeholder="05X-XXXXXXX"
                 value={formData.phoneNumber}
                 onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
                 dir="ltr"
               />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold border-l border-slate-700 pl-4 h-6 flex items-center">
-                <span className="text-blue-400 ml-1">+972</span>
-                <Phone size={18} className="text-slate-500" />
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold border-r border-slate-700 pr-4 h-6 flex items-center">
+                <Phone size={18} className="text-slate-500 ml-2" />
+                <span className="text-blue-400">+972</span>
               </div>
             </div>
           </div>
