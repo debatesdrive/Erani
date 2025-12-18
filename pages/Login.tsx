@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe } from 'lucide-react';
@@ -17,7 +16,7 @@ const Login: React.FC = () => {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [formData, setFormData] = useState({
     fullName: '',
-    phoneNumber: '', // Local number (e.g. 0501234567)
+    phoneNumber: '', 
     otp: '',
   });
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
@@ -26,9 +25,8 @@ const Login: React.FC = () => {
   const [showConfigWarning, setShowConfigWarning] = useState(!isFirebaseConfigured());
 
   useEffect(() => {
-    console.log("Current domain for Firebase Authorized Domains:", window.location.hostname);
-
-    if (!showConfigWarning && !(window as any).recaptchaVerifier) {
+    // Only initialize recaptcha if auth is ready and not already initialized
+    if (auth && !showConfigWarning && !(window as any).recaptchaVerifier) {
       try {
         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
           size: 'invisible',
@@ -42,17 +40,11 @@ const Login: React.FC = () => {
     }
   }, [showConfigWarning]);
 
-  // Helper to normalize Israeli phone number to E.164 format
   const getE164PhoneNumber = (localNumber: string) => {
-    // Remove all non-digits
     let clean = localNumber.replace(/\D/g, '');
-    
-    // If it starts with 0, remove it
     if (clean.startsWith('0')) {
       clean = clean.substring(1);
     }
-    
-    // Prepend Israel country code
     return `+972${clean}`;
   };
 
@@ -65,10 +57,9 @@ const Login: React.FC = () => {
       return;
     }
 
-    // Basic validation for Israeli mobile number length (9 or 10 digits including the leading 0)
     const digitsOnly = formData.phoneNumber.replace(/\D/g, '');
-    if (digitsOnly.length < 9 || digitsOnly.length > 10) {
-      setError('מספר טלפון לא תקין. נא להזין 10 ספרות.');
+    if (digitsOnly.length < 9) {
+      setError('מספר טלפון קצר מדי.');
       return;
     }
 
@@ -77,19 +68,36 @@ const Login: React.FC = () => {
     
     try {
       const e164Number = getE164PhoneNumber(formData.phoneNumber);
+      
+      // Ensure recaptcha is ready
+      if (!(window as any).recaptchaVerifier) {
+         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+      }
+
       const appVerifier = (window as any).recaptchaVerifier;
       const result = await signInWithPhoneNumber(auth, e164Number, appVerifier);
       setConfirmationResult(result);
       setStep('otp');
     } catch (err: any) {
-      console.error("Firebase Auth Error:", err);
-      if (err.code === 'auth/invalid-phone-number') {
-        setError('מספר טלפון לא תקין.');
-      } else if (err.code === 'auth/unauthorized-domain') {
-        setError(`הדומיין ${window.location.hostname} אינו מורשה ב-Firebase Console.`);
+      console.error("Firebase Auth Error Full:", err);
+      
+      // Map specific errors but always show the code for debugging
+      const errorCode = err.code || 'unknown';
+      let message = `שגיאה (${errorCode}): `;
+
+      if (errorCode === 'auth/invalid-phone-number') {
+        message += 'מספר טלפון לא תקין.';
+      } else if (errorCode === 'auth/unauthorized-domain') {
+        message += `הדומיין ${window.location.hostname} אינו מורשה ב-Firebase.`;
+      } else if (errorCode === 'auth/too-many-requests') {
+        message += 'יותר מדי ניסיונות. נא לנסות שוב מאוחר יותר.';
+      } else if (errorCode === 'auth/admin-restricted-operation') {
+        message += 'פעולה חסומה. וודא ש-Phone Auth מופעל ב-Firebase Console.';
       } else {
-        setError('שגיאה בשליחת ה-SMS. וודא שחיברת את הפרויקט ל-Firebase וסיפקת API Key תקין.');
+        message += err.message || 'שגיאה בשליחת ה-SMS.';
       }
+      
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -123,8 +131,8 @@ const Login: React.FC = () => {
 
       login({ ...userData, uid: fbUser.uid } as any);
       navigate('/lobby');
-    } catch (err) {
-      setError('קוד אימות שגוי או פג תוקף.');
+    } catch (err: any) {
+      setError(`קוד שגוי (${err.code || 'error'})`);
     } finally {
       setLoading(false);
     }
@@ -151,14 +159,13 @@ const Login: React.FC = () => {
           <AlertCircle size={32} className="text-amber-500" />
           <h3 className="text-amber-200 font-bold">דרושה הגדרת Firebase</h3>
           <p className="text-amber-200/70 text-sm">
-            עליך לעדכן את קובץ <code className="bg-black/30 px-1 rounded text-white">lib/firebase.ts</code> 
-            עם הפרמטרים מהפרויקט שלך ב-Firebase Console כדי להפעיל את ההתחברות.
+            יש לוודא שקובץ ה-.env מוגדר כראוי וש-Phone Authentication מופעל ב-Firebase Console.
           </p>
         </div>
       )}
 
       {step === 'phone' ? (
-        <form onSubmit={handleSendOtp} className={`w-full space-y-6 animate-fade-in-up ${showConfigWarning ? 'opacity-50 pointer-events-none' : ''}`}>
+        <form onSubmit={handleSendOtp} className={`w-full space-y-6 animate-fade-in-up`}>
           <Input
             label="שם מלא"
             placeholder="ישראל ישראלי"
@@ -189,18 +196,18 @@ const Login: React.FC = () => {
 
           {error && (
             <div className="flex flex-col gap-2">
-              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20">{error}</p>
-              {error.includes('אינו מורשה') && (
+              <p className="text-red-400 text-xs text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20 break-words">{error}</p>
+              {error.includes('auth/unauthorized-domain') && (
                 <div className="flex items-center justify-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg">
                   <Globe size={12} />
-                  <span>העתק את הדומיין והוסף ל-Authorized Domains ב-Firebase</span>
+                  <span>הוסף את {window.location.hostname} ל-Authorized Domains ב-Firebase</span>
                 </div>
               )}
             </div>
           )}
 
           <div className="pt-4">
-            <Button type="submit" fullWidth size="xl" disabled={loading || showConfigWarning}>
+            <Button type="submit" fullWidth size="xl" disabled={loading}>
               {loading ? 'שולח SMS...' : 'שלח קוד אימות'}
             </Button>
           </div>
