@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Star, Check, Send } from 'lucide-react';
-import { collection, addDoc, doc, updateDoc, increment } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+import { Star, Check } from 'lucide-react';
+import { collection, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
 import { useAppContext } from '../App';

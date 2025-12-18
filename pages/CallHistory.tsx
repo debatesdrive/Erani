@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Star, Calendar, User, Clock, Loader2 } from 'lucide-react';
-import { collection, query, where, getDocs, orderBy } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import Layout from '../components/Layout';
 import { useAppContext } from '../App';
 import { db } from '../lib/firebase';
