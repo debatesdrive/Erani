@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -27,7 +26,7 @@ export const useAppContext = () => {
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loadingAuth } = useAppContext() as any;
+  const { user, loadingAuth } = useAppContext();
   if (loadingAuth) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-blue-400">טוען...</div>;
   if (!user) {
     return <Navigate to="/" replace />;
@@ -48,7 +47,7 @@ const App: React.FC = () => {
         const userRef = doc(db, 'users', fbUser.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
-          setUser({ ...userSnap.data(), uid: fbUser.uid } as any);
+          setUser({ ...userSnap.data(), uid: fbUser.uid } as User);
         }
       } else {
         setUser(null);
@@ -70,15 +69,20 @@ const App: React.FC = () => {
     setCurrentTopic(null);
   };
 
+  const updateUser = (data: Partial<User>) => {
+    setUser(prev => prev ? { ...prev, ...data } : null);
+  };
+
   const handleSetStance = (stance: Stance | null) => {
     setSelectedStance(stance);
   };
 
-  const contextValue: any = {
+  const contextValue: AppContextType = {
     user,
     loadingAuth,
     login: handleLogin,
     logout: handleLogout,
+    updateUser,
     selectedStance,
     setStance: handleSetStance,
     currentTopic,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe, Settings, Database } from 'lucide-react';
-import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
+import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Database, ChevronLeft } from 'lucide-react';
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, User as FirebaseUser } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
@@ -13,13 +13,14 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAppContext() as any;
   
-  const [step, setStep] = useState<'phone' | 'otp'>('phone');
+  const [step, setStep] = useState<'phone' | 'otp' | 'name'>('phone');
   const [formData, setFormData] = useState({
     fullName: '',
     phoneNumber: '', 
     otp: '',
   });
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [authenticatedUser, setAuthenticatedUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showConfigWarning, setShowConfigWarning] = useState(!isFirebaseConfigured());
@@ -51,8 +52,8 @@ const Login: React.FC = () => {
     e.preventDefault();
     if (showConfigWarning) return;
     
-    if (!formData.phoneNumber || !formData.fullName) {
-      setError('נא למלא את כל השדות');
+    if (!formData.phoneNumber) {
+      setError('נא להזין מספר טלפון');
       return;
     }
 
@@ -86,7 +87,7 @@ const Login: React.FC = () => {
       } else if (errorCode === 'auth/unauthorized-domain') {
         message = `הדומיין ${window.location.hostname} אינו מורשה ב-Firebase.`;
       } else if (errorCode === 'auth/operation-not-allowed') {
-        message = 'שליחת SMS לישראל אינה מאושרת. יש להגדיר SMS Region Policy ב-Firebase.';
+        message = 'שליחת SMS אינה מאושרת. וודא הגדרות ב-Firebase.';
       } else {
         message = `שגיאה (${errorCode})`;
       }
@@ -104,36 +105,22 @@ const Login: React.FC = () => {
     setError('');
 
     try {
-      // 1. Verify OTP with Firebase Auth
       const result = await confirmationResult.confirm(formData.otp);
       const fbUser = result.user;
+      setAuthenticatedUser(fbUser);
 
-      try {
-        // 2. Try to sync with Firestore
-        const userRef = doc(db, 'users', fbUser.uid);
-        const userSnap = await getDoc(userRef);
+      // Check if user exists in Firestore
+      const userRef = doc(db, 'users', fbUser.uid);
+      const userSnap = await getDoc(userRef);
 
-        let userData;
-        if (!userSnap.exists()) {
-          userData = {
-            fullName: formData.fullName,
-            phoneNumber: getE164PhoneNumber(formData.phoneNumber),
-            stats: { debatesCount: 0, rating: 5.0 }
-          };
-          await setDoc(userRef, userData);
-        } else {
-          userData = userSnap.data();
-        }
-
+      if (userSnap.exists()) {
+        // Existing user - Log in directly
+        const userData = userSnap.data();
         login({ ...userData, uid: fbUser.uid } as any);
         navigate('/lobby');
-      } catch (dbErr: any) {
-        console.error("Firestore Error:", dbErr);
-        if (dbErr.code === 'permission-denied') {
-          setError('שגיאת הרשאות בסיס נתונים. וודא שהגדרת את ה-Firestore Rules ב-Firebase Console.');
-        } else {
-          setError(`שגיאה בגישה לנתונים: ${dbErr.code || 'unknown'}`);
-        }
+      } else {
+        // New user - Transition to name step
+        setStep('name');
       }
     } catch (authErr: any) {
       console.error("OTP Verification Error:", authErr);
@@ -141,6 +128,40 @@ const Login: React.FC = () => {
         setError('קוד אימות שגוי. נסה שוב.');
       } else {
         setError(`שגיאת אימות: ${authErr.code || 'unknown'}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authenticatedUser || !formData.fullName) {
+        setError('נא להזין שם מלא');
+        return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const userData = {
+        fullName: formData.fullName,
+        phoneNumber: authenticatedUser.phoneNumber || getE164PhoneNumber(formData.phoneNumber),
+        stats: { debatesCount: 0, rating: 5.0 }
+      };
+      
+      const userRef = doc(db, 'users', authenticatedUser.uid);
+      await setDoc(userRef, userData);
+
+      login({ ...userData, uid: authenticatedUser.uid } as any);
+      navigate('/lobby');
+    } catch (dbErr: any) {
+      console.error("Firestore Error:", dbErr);
+      if (dbErr.code === 'permission-denied') {
+        setError('שגיאת הרשאות בסיס נתונים.');
+      } else {
+        setError(`שגיאה בשמירת הנתונים: ${dbErr.code || 'unknown'}`);
       }
     } finally {
       setLoading(false);
@@ -167,22 +188,11 @@ const Login: React.FC = () => {
         <div className="bg-amber-900/30 border border-amber-500/50 p-6 rounded-3xl mb-8 flex flex-col items-center text-center gap-3 animate-pulse">
           <AlertCircle size={32} className="text-amber-500" />
           <h3 className="text-amber-200 font-bold">דרושה הגדרת Firebase</h3>
-          <p className="text-amber-200/70 text-sm">
-            יש לוודא שקובץ ה-.env מוגדר כראוי וש-Phone Authentication מופעל ב-Firebase Console.
-          </p>
         </div>
       )}
 
       {step === 'phone' ? (
-        <form onSubmit={handleSendOtp} className={`w-full space-y-6 animate-fade-in-up`}>
-          <Input
-            label="שם מלא"
-            placeholder="ישראל ישראלי"
-            value={formData.fullName}
-            onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-            icon={<UserIcon size={20} />}
-          />
-          
+        <form onSubmit={handleSendOtp} className="w-full space-y-6 animate-fade-in-up">
           <div className="flex flex-col gap-2">
             <label className="text-slate-400 text-sm font-medium pr-1">
               מספר טלפון
@@ -203,13 +213,7 @@ const Login: React.FC = () => {
             </div>
           </div>
 
-          {error && (
-            <div className="flex flex-col gap-3">
-              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-4 rounded-xl border border-red-500/20 break-words">
-                {error}
-              </p>
-            </div>
-          )}
+          {error && <p className="text-red-400 text-sm text-center font-bold">{error}</p>}
 
           <div className="pt-4">
             <Button type="submit" fullWidth size="xl" disabled={loading}>
@@ -217,7 +221,7 @@ const Login: React.FC = () => {
             </Button>
           </div>
         </form>
-      ) : (
+      ) : step === 'otp' ? (
         <form onSubmit={handleVerifyOtp} className="w-full space-y-6 animate-fade-in-up">
           <div className="text-center mb-4">
              <p className="text-slate-300">קוד נשלח למספר <span dir="ltr" className="font-bold text-blue-400">{getE164PhoneNumber(formData.phoneNumber)}</span></p>
@@ -235,32 +239,37 @@ const Login: React.FC = () => {
             className="text-center tracking-[1em]"
           />
 
-          {error && (
-            <div className="flex flex-col gap-3">
-              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-4 rounded-xl border border-red-500/20 break-words">
-                {error}
-              </p>
-              
-              {error.includes('הרשאות בסיס נתונים') && (
-                <div className="flex flex-col gap-2 p-3 bg-slate-900/80 rounded-xl border border-blue-500/30">
-                  <div className="flex items-center gap-2 text-blue-400 text-xs font-bold">
-                    <Database size={14} />
-                    <span>הוראות למפתח:</span>
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-tight">
-                    Firebase Console > Firestore Database > Rules > וודא שהרשאות הקריאה/כתיבה מאושרות למשתמשים מחוברים.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+          {error && <p className="text-red-400 text-sm text-center font-bold">{error}</p>}
 
           <div className="pt-4 space-y-3">
             <Button type="submit" fullWidth size="xl" disabled={loading}>
-              {loading ? 'בודק...' : 'התחבר עכשיו'}
+              {loading ? 'בודק...' : 'המשך'}
             </Button>
             <Button variant="ghost" fullWidth onClick={() => setStep('phone')} disabled={loading}>
               חזור לתיקון מספר
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={handleCompleteSignup} className="w-full space-y-6 animate-fade-in-up">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-black text-white mb-2">נשמח להכיר!</h2>
+            <p className="text-slate-400">איך נרשום אותך במערכת?</p>
+          </div>
+
+          <Input
+            label="שם מלא"
+            placeholder="ישראל ישראלי"
+            value={formData.fullName}
+            onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+            icon={<UserIcon size={20} />}
+          />
+
+          {error && <p className="text-red-400 text-sm text-center font-bold">{error}</p>}
+
+          <div className="pt-4">
+            <Button type="submit" fullWidth size="xl" disabled={loading}>
+              {loading ? 'שומר נתונים...' : 'סיום הרשמה'}
             </Button>
           </div>
         </form>
