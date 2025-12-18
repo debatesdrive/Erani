@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, User as UserIcon, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Globe } from 'lucide-react';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import Layout from '../components/Layout';
@@ -17,7 +17,7 @@ const Login: React.FC = () => {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [formData, setFormData] = useState({
     fullName: '',
-    phoneNumber: '',
+    phoneNumber: '', // Local number (e.g. 0501234567)
     otp: '',
   });
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
@@ -26,7 +26,8 @@ const Login: React.FC = () => {
   const [showConfigWarning, setShowConfigWarning] = useState(!isFirebaseConfigured());
 
   useEffect(() => {
-    // Setup invisible recaptcha
+    console.log("Current domain for Firebase Authorized Domains:", window.location.hostname);
+
     if (!showConfigWarning && !(window as any).recaptchaVerifier) {
       try {
         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
@@ -41,6 +42,20 @@ const Login: React.FC = () => {
     }
   }, [showConfigWarning]);
 
+  // Helper to normalize Israeli phone number to E.164 format
+  const getE164PhoneNumber = (localNumber: string) => {
+    // Remove all non-digits
+    let clean = localNumber.replace(/\D/g, '');
+    
+    // If it starts with 0, remove it
+    if (clean.startsWith('0')) {
+      clean = clean.substring(1);
+    }
+    
+    // Prepend Israel country code
+    return `+972${clean}`;
+  };
+
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (showConfigWarning) return;
@@ -50,20 +65,30 @@ const Login: React.FC = () => {
       return;
     }
 
+    // Basic validation for Israeli mobile number length (9 or 10 digits including the leading 0)
+    const digitsOnly = formData.phoneNumber.replace(/\D/g, '');
+    if (digitsOnly.length < 9 || digitsOnly.length > 10) {
+      setError('מספר טלפון לא תקין. נא להזין 10 ספרות.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     
     try {
+      const e164Number = getE164PhoneNumber(formData.phoneNumber);
       const appVerifier = (window as any).recaptchaVerifier;
-      const result = await signInWithPhoneNumber(auth, formData.phoneNumber, appVerifier);
+      const result = await signInWithPhoneNumber(auth, e164Number, appVerifier);
       setConfirmationResult(result);
       setStep('otp');
     } catch (err: any) {
-      console.error(err);
+      console.error("Firebase Auth Error:", err);
       if (err.code === 'auth/invalid-phone-number') {
-        setError('מספר טלפון לא תקין. נא להשתמש בפורמט בינלאומי (למשל +972...)');
+        setError('מספר טלפון לא תקין.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError(`הדומיין ${window.location.hostname} אינו מורשה ב-Firebase Console.`);
       } else {
-        setError('שגיאה בשליחת ה-SMS. וודא שהגדרת את הדומיין ב-Firebase Console.');
+        setError('שגיאה בשליחת ה-SMS. וודא שחיברת את הפרויקט ל-Firebase וסיפקת API Key תקין.');
       }
     } finally {
       setLoading(false);
@@ -88,7 +113,7 @@ const Login: React.FC = () => {
       if (!userSnap.exists()) {
         userData = {
           fullName: formData.fullName,
-          phoneNumber: formData.phoneNumber,
+          phoneNumber: getE164PhoneNumber(formData.phoneNumber),
           stats: { debatesCount: 0, rating: 5.0 }
         };
         await setDoc(userRef, userData);
@@ -142,17 +167,37 @@ const Login: React.FC = () => {
             icon={<UserIcon size={20} />}
           />
           
-          <Input
-            label="מספר טלפון (פורמט בינלאומי)"
-            type="tel"
-            placeholder="+972501234567"
-            value={formData.phoneNumber}
-            onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-            icon={<Phone size={20} />}
-            dir="ltr"
-          />
+          <div className="flex flex-col gap-2">
+            <label className="text-slate-400 text-sm font-medium pr-1">
+              מספר טלפון
+            </label>
+            <div className="relative">
+              <input
+                className="w-full h-14 bg-slate-900 border border-slate-700 rounded-xl px-4 pr-20 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                type="tel"
+                placeholder="05X-XXXXXXX"
+                value={formData.phoneNumber}
+                onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                dir="ltr"
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold border-l border-slate-700 pl-4 h-6 flex items-center">
+                <span className="text-blue-400 ml-1">+972</span>
+                <Phone size={18} className="text-slate-500" />
+              </div>
+            </div>
+          </div>
 
-          {error && <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20">{error}</p>}
+          {error && (
+            <div className="flex flex-col gap-2">
+              <p className="text-red-400 text-sm text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20">{error}</p>
+              {error.includes('אינו מורשה') && (
+                <div className="flex items-center justify-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg">
+                  <Globe size={12} />
+                  <span>העתק את הדומיין והוסף ל-Authorized Domains ב-Firebase</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="pt-4">
             <Button type="submit" fullWidth size="xl" disabled={loading || showConfigWarning}>
@@ -163,7 +208,7 @@ const Login: React.FC = () => {
       ) : (
         <form onSubmit={handleVerifyOtp} className="w-full space-y-6 animate-fade-in-up">
           <div className="text-center mb-4">
-             <p className="text-slate-300">קוד נשלח למספר <span dir="ltr" className="font-bold text-blue-400">{formData.phoneNumber}</span></p>
+             <p className="text-slate-300">קוד נשלח למספר <span dir="ltr" className="font-bold text-blue-400">{getE164PhoneNumber(formData.phoneNumber)}</span></p>
           </div>
           
           <Input
