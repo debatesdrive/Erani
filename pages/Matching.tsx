@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Radio, X, Loader2 } from 'lucide-react';
+import io from 'socket.io-client';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
 import { useAppContext } from '../App';
@@ -8,22 +9,44 @@ import { Stance } from '../types';
 
 const Matching: React.FC = () => {
   const navigate = useNavigate();
-  const { selectedStance } = useAppContext();
-  const [countdown, setCountdown] = useState(5);
+  const { selectedStance, user } = useAppContext();
+  const [socket, setSocket] = useState<any>(null);
+  const [isMatching, setIsMatching] = useState(false);
 
-  // Countdown timer logic
   useEffect(() => {
-    if (countdown === 0) {
-      navigate('/call');
+    if (!selectedStance || !user) {
+      navigate('/lobby');
       return;
     }
+  }, [selectedStance, user, navigate]);
 
-    const timer = setInterval(() => {
-      setCountdown((prev) => prev - 1);
-    }, 1000);
+  useEffect(() => {
+    const newSocket = io(`http://${window.location.hostname}:3002`);
+    setSocket(newSocket);
 
-    return () => clearInterval(timer);
-  }, [countdown, navigate]);
+    newSocket.on('matched', (data: { roomId: string; opponentStance: string; opponent: any }) => {
+      console.log('Matched!', data);
+      navigate('/call', { state: { roomId: data.roomId, opponentStance: data.opponentStance, opponent: data.opponent } });
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (socket && selectedStance && user && !isMatching) {
+      socket.emit('joinMatching', { stance: selectedStance, user });
+      setIsMatching(true);
+    }
+  }, [socket, selectedStance, user, isMatching]);
+
+  const handleCancel = () => {
+    if (socket) {
+      socket.emit('leaveMatching');
+    }
+    navigate('/lobby');
+  };
 
   return (
     <Layout className="items-center justify-center relative">
@@ -37,11 +60,7 @@ const Matching: React.FC = () => {
           
           {/* Core Circle */}
           <div className="w-32 h-32 bg-slate-900 border-4 border-blue-500 rounded-full flex items-center justify-center shadow-lg shadow-blue-500/50 relative z-20">
-            {countdown <= 3 ? (
-              <span className="text-6xl font-black text-white animate-pulse">{countdown}</span>
-            ) : (
-               <Radio className="w-12 h-12 text-blue-400 animate-pulse" />
-            )}
+            <Radio className="w-12 h-12 text-blue-400 animate-pulse" />
           </div>
 
           {/* Stance Indicator badge */}
@@ -55,14 +74,8 @@ const Matching: React.FC = () => {
         </div>
 
         <h2 className="text-2xl font-bold text-white mb-4 flex items-center justify-center gap-3">
-          {countdown < 5 ? (
-             <span>השיחה מתחילה בעוד...</span>
-          ) : (
-            <>
-              <span>מחפש פרטנר לשיחה</span>
-              <Loader2 className="animate-spin text-blue-400" size={24} />
-            </>
-          )}
+          <span>מחפש פרטנר לשיחה</span>
+          <Loader2 className="animate-spin text-blue-400" size={24} />
         </h2>
         <p className="text-slate-400 text-lg mb-8">
           שמור על עירנות! מחפשים מישהו עם דעה מנוגדת.
@@ -70,7 +83,7 @@ const Matching: React.FC = () => {
 
         <Button 
           variant="outline" 
-          onClick={() => navigate('/lobby')}
+          onClick={handleCancel}
           className="min-w-[150px] border-slate-700 text-slate-500 hover:border-red-500 hover:text-red-500"
         >
           <X size={20} className="ml-2" />

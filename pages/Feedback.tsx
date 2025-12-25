@@ -69,14 +69,14 @@ const Feedback: React.FC = () => {
       <div className="w-full flex-1 flex flex-col items-center animate-fade-in-up">
         <div className="text-center mt-4 mb-8">
           <h2 className="text-3xl font-black text-white mb-2">דרג את השיחה</h2>
-          <p className="text-slate-400">איך היה הדיון עם {MOCK_OPPONENT.name}?</p>
+          <p className="text-slate-400">איך היה הדיון עם {opponent?.fullName || MOCK_OPPONENT.name}?</p>
         </div>
 
         <div className="relative mb-8">
           <div className="w-24 h-24 rounded-full p-1 bg-gradient-to-br from-slate-700 to-slate-800 shadow-xl">
             <img 
-              src={MOCK_OPPONENT.avatarUrl} 
-              alt={MOCK_OPPONENT.name}
+              src={opponent?.avatarUrl || MOCK_OPPONENT.avatarUrl} 
+              alt={opponent?.fullName || MOCK_OPPONENT.name}
               className="w-full h-full rounded-full object-cover border-4 border-slate-900"
             />
           </div>
