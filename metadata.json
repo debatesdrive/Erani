@@ -1,5 +1,7 @@
 {
   "name": "Erani - Debate Drive",
   "description": "A social road safety app that keeps drivers alert through engaging political debates.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

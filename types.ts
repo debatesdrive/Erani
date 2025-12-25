@@ -9,12 +9,12 @@ export interface UserStats {
 }
 
 export interface User {
-  id?: number;
+  uid: string;
   fullName: string;
   phoneNumber: string;
+  photoURL?: string;
   bio?: string;
   topics?: string[];
-  profilePicture?: string;
   stats: UserStats;
 }
 
@@ -30,8 +30,10 @@ export interface AppContextType {
   user: User | null;
   login: (user: User) => void;
   logout: () => void;
+  updateUser: (data: Partial<User>) => void;
   selectedStance: Stance | null;
   setStance: (stance: Stance | null) => void;
   currentTopic: Topic | null;
   setCurrentTopic: (topic: Topic) => void;
+  loadingAuth: boolean;
 }

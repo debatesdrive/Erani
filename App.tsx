@@ -1,7 +1,9 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { User, Stance, AppContextType, Topic } from './types';
+import { auth, db } from './lib/firebase';
 import Login from './pages/Login';
 import Lobby from './pages/Lobby';
 import StanceSelection from './pages/StanceSelection';
@@ -24,7 +26,8 @@ export const useAppContext = () => {
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAppContext();
+  const { user, loadingAuth } = useAppContext();
+  if (loadingAuth) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-blue-400">טוען...</div>;
   if (!user) {
     return <Navigate to="/" replace />;
   }
@@ -32,31 +35,42 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 const App: React.FC = () => {
-  // State
   const [user, setUser] = useState<User | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
   const [selectedStance, setSelectedStance] = useState<Stance | null>(null);
   const [currentTopic, setCurrentTopic] = useState<Topic | null>(null);
 
-  // Initialize
   useEffect(() => {
-    // Load user from local storage
-    const storedUser = localStorage.getItem('erani_user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        // Fetch full profile from Firestore
+        const userRef = doc(db, 'users', fbUser.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          setUser({ ...userSnap.data(), uid: fbUser.uid } as User);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoadingAuth(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // Handlers
   const handleLogin = (newUser: User) => {
     setUser(newUser);
-    localStorage.setItem('erani_user', JSON.stringify(newUser));
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut(auth);
     setUser(null);
-    localStorage.removeItem('erani_user');
     setSelectedStance(null);
     setCurrentTopic(null);
+  };
+
+  const updateUser = (data: Partial<User>) => {
+    setUser(prev => prev ? { ...prev, ...data } : null);
   };
 
   const handleSetStance = (stance: Stance | null) => {
@@ -65,8 +79,10 @@ const App: React.FC = () => {
 
   const contextValue: AppContextType = {
     user,
+    loadingAuth,
     login: handleLogin,
     logout: handleLogout,
+    updateUser,
     selectedStance,
     setStance: handleSetStance,
     currentTopic,
@@ -78,62 +94,13 @@ const App: React.FC = () => {
       <HashRouter>
         <Routes>
           <Route path="/" element={<Login />} />
-          <Route
-            path="/lobby"
-            element={
-              <ProtectedRoute>
-                <Lobby />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/stance"
-            element={
-              <ProtectedRoute>
-                <StanceSelection />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/matching"
-            element={
-              <ProtectedRoute>
-                <Matching />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/call"
-            element={
-              <ProtectedRoute>
-                <Call />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/feedback"
-            element={
-              <ProtectedRoute>
-                <Feedback />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <Profile />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/history"
-            element={
-              <ProtectedRoute>
-                <CallHistory />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/lobby" element={<ProtectedRoute><Lobby /></ProtectedRoute>} />
+          <Route path="/stance" element={<ProtectedRoute><StanceSelection /></ProtectedRoute>} />
+          <Route path="/matching" element={<ProtectedRoute><Matching /></ProtectedRoute>} />
+          <Route path="/call" element={<ProtectedRoute><Call /></ProtectedRoute>} />
+          <Route path="/feedback" element={<ProtectedRoute><Feedback /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><CallHistory /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>

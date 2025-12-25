@@ -1,8 +1,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Star, Calendar, User, Clock } from 'lucide-react';
+import { ArrowRight, Star, Calendar, User, Clock, Loader2 } from 'lucide-react';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import Layout from '../components/Layout';
+import { useAppContext } from '../App';
+import { db } from '../lib/firebase';
 
 interface HistoryItem {
   opponent: string;
@@ -13,28 +16,43 @@ interface HistoryItem {
 
 const CallHistory: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAppContext() as any;
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedHistory = localStorage.getItem('erani_feedback_history');
-    if (storedHistory) {
+    const fetchHistory = async () => {
+      if (!user) return;
+      
       try {
-        const parsed = JSON.parse(storedHistory);
-        // Sort by date descending (newest first)
-        parsed.sort((a: HistoryItem, b: HistoryItem) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setHistory(parsed);
-      } catch (e) {
-        console.error('Failed to parse history', e);
+        const q = query(
+          collection(db, 'calls'),
+          where('userId', '==', user.uid),
+          orderBy('timestamp', 'desc')
+        );
+        
+        const querySnapshot = await getDocs(q);
+        const results: HistoryItem[] = [];
+        querySnapshot.forEach((doc) => {
+          results.push(doc.data() as HistoryItem);
+        });
+        setHistory(results);
+      } catch (err) {
+        console.error('Error fetching history', err);
+      } finally {
+        setLoading(false);
       }
-    }
-  }, []);
+    };
+
+    fetchHistory();
+  }, [user]);
 
   const formatDate = (isoString: string) => {
     try {
       const date = new Date(isoString);
       return new Intl.DateTimeFormat('he-IL', {
         day: 'numeric',
-        month: 'numeric', // 'short' sometimes produces unexpected results in some envs, numeric is safer
+        month: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
       }).format(date);
@@ -55,7 +73,12 @@ const CallHistory: React.FC = () => {
       }
     >
       <div className="flex flex-col gap-4 animate-fade-in-up pb-8">
-        {history.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center mt-20 text-blue-400 gap-4">
+             <Loader2 size={40} className="animate-spin" />
+             <p>טוען היסטוריה...</p>
+          </div>
+        ) : history.length === 0 ? (
           <div className="flex flex-col items-center justify-center mt-20 text-slate-500 gap-4">
             <div className="w-20 h-20 rounded-full bg-slate-900 flex items-center justify-center border border-slate-800">
                 <Clock size={40} />
@@ -64,16 +87,16 @@ const CallHistory: React.FC = () => {
           </div>
         ) : (
           history.map((item, index) => (
-            <div key={index} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm transition-transform hover:scale-[1.01]">
+            <div key={index} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-slate-400 shrink-0">
+                <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-slate-400">
                     <User size={20} />
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-lg">{item.opponent}</h3>
                   <div className="flex items-center text-slate-500 text-xs gap-1">
                     <Calendar size={12} />
-                    <span dir="ltr" className="text-right">{formatDate(item.timestamp)}</span>
+                    <span dir="ltr">{formatDate(item.timestamp)}</span>
                   </div>
                 </div>
               </div>
@@ -83,13 +106,6 @@ const CallHistory: React.FC = () => {
                     <span className="font-bold text-amber-500 ml-1 text-sm">{item.rating}</span>
                     <Star size={14} className="fill-amber-500 text-amber-500" />
                  </div>
-                 {item.tags && item.tags.length > 0 && (
-                     <div className="flex gap-1">
-                        {item.tags.slice(0, 2).map(tag => (
-                          <span key={tag} className="w-2 h-2 rounded-full bg-blue-500/50"></span>
-                        ))}
-                     </div>
-                 )}
               </div>
             </div>
           ))

@@ -1,134 +1,279 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, User as UserIcon } from 'lucide-react';
+import { Phone, User as UserIcon, ShieldCheck, AlertCircle, Database, ChevronLeft } from 'lucide-react';
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, User as FirebaseUser } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
 import Input from '../components/Input';
 import { useAppContext } from '../App';
+import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
-  const { login } = useAppContext();
-
+  const { login } = useAppContext() as any;
+  
+  const [step, setStep] = useState<'phone' | 'otp' | 'name'>('phone');
   const [formData, setFormData] = useState({
     fullName: '',
-    phoneNumber: '',
+    phoneNumber: '', 
+    otp: '',
   });
-  const [errors, setErrors] = useState({
-    fullName: '',
-    phoneNumber: '',
-  });
-  const [isLoading, setIsLoading] = useState(false);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [authenticatedUser, setAuthenticatedUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [showConfigWarning, setShowConfigWarning] = useState(!isFirebaseConfigured());
 
-  const validate = () => {
-    let isValid = true;
-    const newErrors = { fullName: '', phoneNumber: '' };
-
-    if (!formData.fullName.trim()) {
-      newErrors.fullName = 'נא להזין שם מלא';
-      isValid = false;
+  useEffect(() => {
+    if (auth && !showConfigWarning && !(window as any).recaptchaVerifier) {
+      try {
+        (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: () => {
+            console.log('Recaptcha resolved');
+          }
+        });
+      } catch (err) {
+        console.error('Recaptcha init failed', err);
+      }
     }
+  }, [showConfigWarning]);
 
-    // Validation for phone number
-    // Strip all non-digit characters to check pure length
-    const cleanedPhone = formData.phoneNumber.replace(/\D/g, '');
-    
-    if (!formData.phoneNumber.trim()) {
-      newErrors.phoneNumber = 'נא להזין מספר טלפון';
-      isValid = false;
-    } else if (cleanedPhone.length < 9 || cleanedPhone.length > 15) {
-      // Allows 9-10 digits for standard local numbers, up to 15 for international
-      newErrors.phoneNumber = 'מספר טלפון לא תקין (9-15 ספרות)';
-      isValid = false;
+  const getE164PhoneNumber = (localNumber: string) => {
+    let clean = localNumber.replace(/\D/g, '');
+    if (clean.startsWith('0')) {
+      clean = clean.substring(1);
     }
-
-    setErrors(newErrors);
-    return isValid;
+    return `+972${clean}`;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (showConfigWarning) return;
+    
+    if (!formData.phoneNumber) {
+      setError('נא להזין מספר טלפון');
+      return;
+    }
 
-    setIsLoading(true);
+    const digitsOnly = formData.phoneNumber.replace(/\D/g, '');
+    if (digitsOnly.length < 9) {
+      setError('מספר טלפון קצר מדי.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    
     try {
-      const response = await fetch(`http://${window.location.hostname}:3002/api/users/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fullName: formData.fullName,
-          phoneNumber: formData.phoneNumber,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Login failed');
+      const e164Number = getE164PhoneNumber(formData.phoneNumber);
+      
+      if (!(window as any).recaptchaVerifier) {
+         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
       }
 
-      const data = await response.json();
+      const appVerifier = (window as any).recaptchaVerifier;
+      const result = await signInWithPhoneNumber(auth, e164Number, appVerifier);
+      setConfirmationResult(result);
+      setStep('otp');
+    } catch (err: any) {
+      console.error("Firebase Auth Error:", err);
+      const errorCode = err.code || 'unknown';
+      let message = '';
 
-      // Login with user data from API
-      login(data.user);
-      navigate('/lobby');
-    } catch (error) {
-      console.error('Login error:', error);
-      setErrors({
-        fullName: '',
-        phoneNumber: 'שגיאה בהתחברות. נסה שוב.',
-      });
+      if (errorCode === 'auth/invalid-phone-number') {
+        message = 'מספר טלפון לא תקין.';
+      } else if (errorCode === 'auth/unauthorized-domain') {
+        message = `הדומיין ${window.location.hostname} אינו מורשה ב-Firebase.`;
+      } else if (errorCode === 'auth/operation-not-allowed') {
+        message = 'שליחת SMS אינה מאושרת. וודא הגדרות ב-Firebase.';
+      } else {
+        message = `שגיאה (${errorCode})`;
+      }
+      setError(message);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirmationResult || !formData.otp) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await confirmationResult.confirm(formData.otp);
+      const fbUser = result.user;
+      setAuthenticatedUser(fbUser);
+
+      // Check if user exists in Firestore
+      const userRef = doc(db, 'users', fbUser.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        // Existing user - Log in directly
+        const userData = userSnap.data();
+        login({ ...userData, uid: fbUser.uid } as any);
+        navigate('/lobby');
+      } else {
+        // New user - Transition to name step
+        setStep('name');
+      }
+    } catch (authErr: any) {
+      console.error("OTP Verification Error:", authErr);
+      if (authErr.code === 'auth/invalid-verification-code') {
+        setError('קוד אימות שגוי. נסה שוב.');
+      } else {
+        setError(`שגיאת אימות: ${authErr.code || 'unknown'}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authenticatedUser || !formData.fullName) {
+        setError('נא להזין שם מלא');
+        return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const userData = {
+        fullName: formData.fullName,
+        phoneNumber: authenticatedUser.phoneNumber || getE164PhoneNumber(formData.phoneNumber),
+        stats: { debatesCount: 0, rating: 5.0 }
+      };
+      
+      const userRef = doc(db, 'users', authenticatedUser.uid);
+      await setDoc(userRef, userData);
+
+      login({ ...userData, uid: authenticatedUser.uid } as any);
+      navigate('/lobby');
+    } catch (dbErr: any) {
+      console.error("Firestore Error:", dbErr);
+      if (dbErr.code === 'permission-denied') {
+        setError('שגיאת הרשאות בסיס נתונים.');
+      } else {
+        setError(`שגיאה בשמירת הנתונים: ${dbErr.code || 'unknown'}`);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <Layout className="justify-center">
+      <div id="recaptcha-container"></div>
+      
       <div className="flex flex-col items-center mb-12 animate-fade-in-up">
-        {/* Logo Image */}
-        <div className="w-48 h-48 mb-6 rounded-full overflow-hidden shadow-[0_0_40px_rgba(37,99,235,0.3)] border-4 border-slate-800 relative bg-slate-900 flex items-center justify-center">
-           {/* Placeholder for the attached Erani Waveform Logo */}
+        <div className="w-40 h-40 mb-6 rounded-full overflow-hidden shadow-[0_0_40px_rgba(37,99,235,0.3)] border-4 border-slate-800 relative bg-slate-900 flex items-center justify-center">
            <img 
              src="https://placehold.co/400x400/0f172a/ffffff?text=ERANI+Waveform" 
              alt="Erani Logo" 
              className="w-full h-full object-cover scale-110"
            />
         </div>
-        
         <h1 className="text-5xl font-black tracking-tight mb-2 text-white drop-shadow-lg">ערני</h1>
         <p className="text-blue-400 text-xl font-bold text-center px-4 tracking-wide">משנים הילוך בשיח הישראלי</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="w-full space-y-6 animate-fade-in-up" style={{ animationDelay: '100ms' }}>
-        <Input
-          label="שם מלא"
-          placeholder="ישראל ישראלי"
-          value={formData.fullName}
-          onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-          error={errors.fullName}
-          icon={<UserIcon size={20} />}
-        />
-        
-        <Input
-          label="מספר טלפון"
-          type="tel"
-          inputMode="tel"
-          placeholder="050-1234567 או +972..."
-          value={formData.phoneNumber}
-          onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-          error={errors.phoneNumber}
-          icon={<Phone size={20} />}
-          dir="ltr"
-          className="text-right"
-        />
-
-        <div className="pt-4">
-          <Button type="submit" fullWidth size="xl" disabled={isLoading}>
-            {isLoading ? 'מתחבר...' : 'התחל נסיעה'}
-          </Button>
+      {showConfigWarning && (
+        <div className="bg-amber-900/30 border border-amber-500/50 p-6 rounded-3xl mb-8 flex flex-col items-center text-center gap-3 animate-pulse">
+          <AlertCircle size={32} className="text-amber-500" />
+          <h3 className="text-amber-200 font-bold">דרושה הגדרת Firebase</h3>
         </div>
-      </form>
+      )}
+
+      {step === 'phone' ? (
+        <form onSubmit={handleSendOtp} className="w-full space-y-6 animate-fade-in-up">
+          <div className="flex flex-col gap-2">
+            <label className="text-slate-400 text-sm font-medium pr-1">
+              מספר טלפון
+            </label>
+            <div className="relative">
+              <input
+                className="w-full h-14 bg-slate-900 border border-slate-700 rounded-xl px-4 pl-24 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                type="tel"
+                placeholder="05X-XXXXXXX"
+                value={formData.phoneNumber}
+                onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                dir="ltr"
+              />
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold border-r border-slate-700 pr-4 h-6 flex items-center">
+                <Phone size={18} className="text-slate-500 ml-2" />
+                <span className="text-blue-400">+972</span>
+              </div>
+            </div>
+          </div>
+
+          {error && <p className="text-red-400 text-sm text-center font-bold">{error}</p>}
+
+          <div className="pt-4">
+            <Button type="submit" fullWidth size="xl" disabled={loading}>
+              {loading ? 'שולח SMS...' : 'שלח קוד אימות'}
+            </Button>
+          </div>
+        </form>
+      ) : step === 'otp' ? (
+        <form onSubmit={handleVerifyOtp} className="w-full space-y-6 animate-fade-in-up">
+          <div className="text-center mb-4">
+             <p className="text-slate-300">קוד נשלח למספר <span dir="ltr" className="font-bold text-blue-400">{getE164PhoneNumber(formData.phoneNumber)}</span></p>
+          </div>
+          
+          <Input
+            label="קוד אימות (6 ספרות)"
+            type="text"
+            inputMode="numeric"
+            placeholder="000000"
+            maxLength={6}
+            value={formData.otp}
+            onChange={(e) => setFormData({ ...formData, otp: e.target.value })}
+            icon={<ShieldCheck size={20} />}
+            className="text-center tracking-[1em]"
+          />
+
+          {error && <p className="text-red-400 text-sm text-center font-bold">{error}</p>}
+
+          <div className="pt-4 space-y-3">
+            <Button type="submit" fullWidth size="xl" disabled={loading}>
+              {loading ? 'בודק...' : 'המשך'}
+            </Button>
+            <Button variant="ghost" fullWidth onClick={() => setStep('phone')} disabled={loading}>
+              חזור לתיקון מספר
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={handleCompleteSignup} className="w-full space-y-6 animate-fade-in-up">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-black text-white mb-2">נשמח להכיר!</h2>
+            <p className="text-slate-400">איך נרשום אותך במערכת?</p>
+          </div>
+
+          <Input
+            label="שם מלא"
+            placeholder="ישראל ישראלי"
+            value={formData.fullName}
+            onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+            icon={<UserIcon size={20} />}
+          />
+
+          {error && <p className="text-red-400 text-sm text-center font-bold">{error}</p>}
+
+          <div className="pt-4">
+            <Button type="submit" fullWidth size="xl" disabled={loading}>
+              {loading ? 'שומר נתונים...' : 'סיום הרשמה'}
+            </Button>
+          </div>
+        </form>
+      )}
     </Layout>
   );
 };
